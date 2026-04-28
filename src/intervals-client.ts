@@ -141,6 +141,43 @@ export class IntervalsClient {
     return this.request("GET", `/athlete/${this.aid(athleteId)}/gear`);
   }
 
+  // Activity chat (coach/athlete messages attached to an activity)
+  async getChatMessages(chatId: string | number): Promise<unknown[]> {
+    // The API returns most-recent-first, capped at 100 per call. Paginate with
+    // `beforeId` so we can return the full thread.
+    const all: unknown[] = [];
+    let beforeId: string | undefined;
+    while (true) {
+      const query: Record<string, string> = { limit: "100" };
+      if (beforeId !== undefined) query.beforeId = beforeId;
+      const batch = (await this.request(
+        "GET",
+        `/chats/${chatId}/messages`,
+        undefined,
+        query
+      )) as unknown[];
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      all.push(...batch);
+      if (batch.length < 100) break;
+      const last = batch[batch.length - 1] as { id?: unknown };
+      if (last?.id === undefined || last.id === null) break;
+      beforeId = String(last.id);
+    }
+    return all;
+  }
+
+  async sendChatMessage(chatId: string | number, content: string) {
+    return this.request("POST", `/chats/send-message`, {
+      chat_id: chatId,
+      content,
+      type: "TEXT",
+    });
+  }
+
+  async deleteChatMessage(chatId: string | number, messageId: string | number) {
+    return this.request("DELETE", `/chats/${chatId}/messages/${messageId}`);
+  }
+
   // Power/pace curves
   async getActivityPaceCurves(oldest?: string, newest?: string, athleteId?: string) {
     const query: Record<string, string> = {};

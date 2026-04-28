@@ -378,6 +378,78 @@ server.tool(
   }
 );
 
+// --- Activity chat ---
+// The chat thread is referenced from the activity via `icu_chat_id`. We resolve
+// it on every call so the caller only needs the activity ID.
+
+async function resolveActivityChatId(activityId: string): Promise<number | null> {
+  const activity = (await client.getActivity(activityId)) as {
+    icu_chat_id?: number | null;
+  };
+  const chatId = activity.icu_chat_id;
+  return chatId === undefined || chatId === null ? null : chatId;
+}
+
+server.tool(
+  "get_activity_chat",
+  "Get the chat thread (coach/athlete messages) attached to an activity. Returns messages oldest → newest. If the activity has no chat thread yet, returns an empty list.",
+  {
+    activity_id: z.string().describe("Activity ID (e.g. i12345)"),
+  },
+  async ({ activity_id }) => {
+    const chatId = await resolveActivityChatId(activity_id);
+    if (chatId === null) {
+      return { content: [{ type: "text", text: JSON.stringify([], null, 2) }] };
+    }
+    const messages = await client.getChatMessages(chatId);
+    // API returns most-recent-first; reverse to oldest → newest.
+    const sorted = [...messages].reverse();
+    return { content: [{ type: "text", text: JSON.stringify(sorted, null, 2) }] };
+  }
+);
+
+server.tool(
+  "post_activity_chat_message",
+  `Post a new message in the chat thread of an activity.
+
+⚠️  DO NOT INVOKE AUTOMATICALLY. This sends a message that is visible to the coach/athlete on Intervals.icu. Only call this tool when the user has explicitly asked to post a chat message — never as part of an unattended agent workflow, summary, or analysis flow.
+
+Resolves the chat via the activity's icu_chat_id field. Errors if the activity does not yet have a chat thread.`,
+  {
+    activity_id: z.string().describe("Activity ID (e.g. i12345)"),
+    message: z.string().describe("Message body to post"),
+  },
+  async ({ activity_id, message }) => {
+    const chatId = await resolveActivityChatId(activity_id);
+    if (chatId === null) {
+      throw new Error(
+        `Activity ${activity_id} has no chat thread (icu_chat_id is empty); cannot post a message.`
+      );
+    }
+    const result = await client.sendChatMessage(chatId, message);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "delete_activity_chat_message",
+  "Delete a message from an activity's chat thread by message ID.",
+  {
+    activity_id: z.string().describe("Activity ID (e.g. i12345)"),
+    message_id: z.string().describe("Message ID to delete"),
+  },
+  async ({ activity_id, message_id }) => {
+    const chatId = await resolveActivityChatId(activity_id);
+    if (chatId === null) {
+      throw new Error(
+        `Activity ${activity_id} has no chat thread (icu_chat_id is empty); nothing to delete.`
+      );
+    }
+    await client.deleteChatMessage(chatId, message_id);
+    return { content: [{ type: "text", text: "Message deleted successfully" }] };
+  }
+);
+
 // --- Prompts ---
 
 server.prompt(
